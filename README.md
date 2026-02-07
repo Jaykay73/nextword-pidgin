@@ -14,7 +14,7 @@ license: mit
 
 I built this deep learning project to predict the next word in **Nigerian Pidgin** (Naija) text. The system features a dual-model architecture (LSTM + Trigram) served via a FastAPI backend and an interactive Streamlit frontend.
 
-🔗 **Live Demo:** [Hugging Face Space](https://huggingface.co/spaces/Jaykay73/nextword-pidgin)  
+🔗 **Live Demo:** [Streamlit App](https://nextword-pidgin.streamlit.app)  
 🔗 **API Docs:** [API Endpoint](https://huggingface.co/spaces/Jaykay73/nextword-pidgin-api/docs)
 
 ---
