@@ -81,39 +81,8 @@ class LSTMLanguageModel(nn.Module):
 # =============================================================================
 # Trigram Model
 # =============================================================================
-class TrigramLM:
-    def __init__(self, smoothing: float = 1.0):
-        self.smoothing = smoothing
-        self.unigram_counts = {}
-        self.bigram_counts = {}
-        self.trigram_counts = {}
-        self.vocab = set()
-    
-    def probability(self, w3: str, w1: str, w2: str) -> float:
-        trigram_count = self.trigram_counts.get((w1, w2, w3), 0)
-        bigram_count = self.bigram_counts.get((w1, w2), 0)
-        vocab_size = len(self.vocab)
-        numerator = trigram_count + self.smoothing
-        denominator = bigram_count + (self.smoothing * vocab_size)
-        return numerator / denominator if denominator > 0 else 0.0
-    
-    def predict_next_words(self, context: str, top_k: int = 5) -> List[Tuple[str, float]]:
-        words = context.lower().split()
-        if len(words) == 0:
-            w1, w2 = START_TOKEN, START_TOKEN
-        elif len(words) == 1:
-            w1, w2 = START_TOKEN, words[0]
-        else:
-            w1, w2 = words[-2], words[-1]
-        
-        candidates = []
-        for word in self.vocab:
-            if word not in (START_TOKEN, END_TOKEN, '<s>', '</s>'):
-                prob = self.probability(word, w1, w2)
-                candidates.append((word, prob))
-        
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates[:top_k]
+# Import directly from src to ensure compatibility with pickle
+from src.trigram_model import TrigramLM
 
 # =============================================================================
 # Global Models (loaded once at startup)
@@ -122,16 +91,6 @@ lstm_model = None
 word_to_idx = None
 idx_to_word = None
 trigram_model = None
-
-# =============================================================================
-# Custom Unpickler to fix the 'src' module error
-# =============================================================================
-class PatchingUnpickler(pickle.Unpickler):
-    def find_class(self, module, name):
-        # If the pickle creates a dependency on 'src', redirect it to __main__
-        if module.startswith("src") and name == "TrigramLM":
-            return TrigramLM
-        return super().find_class(module, name)
 
 @app.on_event("startup")
 async def load_models():
@@ -151,11 +110,10 @@ async def load_models():
     except Exception as e:
         print(f"Failed to load LSTM model: {e}")
 
-    # 2. Load Trigram (Using the Custom Unpickler)
+    # 2. Load Trigram
     try:
         with open('model/trigram_model.pkl', 'rb') as f:
-            # Use PatchingUnpickler instead of standard pickle.load
-            trigram_model = PatchingUnpickler(f).load()
+            trigram_model = pickle.load(f)
         print(f"Trigram model loaded! Vocab size: {len(trigram_model.vocab)}")
     except Exception as e:
         print(f"Failed to load Trigram model: {e}")
@@ -204,7 +162,7 @@ def predict_lstm(context: str, top_k: int = 5) -> List[Prediction]:
     top_probs, top_indices = torch.topk(probs[0], top_k + 5)
     
     results = []
-    for prob, idx in zip(top_probs.numpy(), top_indices.numpy()):
+    for prob, idx in zip(top_probs.tolist(), top_indices.tolist()):
         word = idx_to_word.get(str(idx), idx_to_word.get(idx, UNK_TOKEN))
         if word not in [PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]:
             results.append(Prediction(word=word, probability=float(prob)))
@@ -231,7 +189,8 @@ async def root():
             "/predict": "POST - Get predictions",
             "/predict/lstm": "GET - LSTM predictions",
             "/predict/trigram": "GET - Trigram predictions",
-            "/health": "GET - Health check"
+            "/health": "GET - Health check",
+            "/debug": "GET - System info"
         }
     }
 
@@ -240,17 +199,40 @@ async def health():
     return {
         "status": "healthy",
         "lstm_loaded": lstm_model is not None,
-        "trigram_loaded": trigram_model is not None
+        "trigram_loaded": trigram_model is not None,
+        "vocab_size": len(word_to_idx) if word_to_idx else 0
+    }
+
+@app.get("/debug")
+async def debug_info():
+    """Return debug information about the environment."""
+    import sys
+    return {
+        "cwd": os.getcwd(),
+        "files_root": os.listdir('.'),
+        "files_model": os.listdir('model') if os.path.exists('model') else "MISSING",
+        "files_src": os.listdir('src') if os.path.exists('src') else "MISSING",
+        "python_path": sys.path,
+        "lstm_model_type": str(type(lstm_model)) if lstm_model else "None",
+        "trigram_model_type": str(type(trigram_model)) if trigram_model else "None",
     }
 
 @app.post("/predict", response_model=BothModelsResponse)
 async def predict(request: PredictionRequest):
     """Get predictions from both models."""
-    return BothModelsResponse(
-        context=request.context,
-        lstm=predict_lstm(request.context, request.top_k),
-        trigram=predict_trigram(request.context, request.top_k)
-    )
+    try:
+        lstm_preds = predict_lstm(request.context, request.top_k)
+        trigram_preds = predict_trigram(request.context, request.top_k)
+        
+        return BothModelsResponse(
+            context=request.context,
+            lstm=lstm_preds,
+            trigram=trigram_preds
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Prediction Failed: {str(e)}")
 
 @app.get("/predict/lstm")
 async def predict_lstm_endpoint(context: str, top_k: int = 5):
@@ -258,12 +240,15 @@ async def predict_lstm_endpoint(context: str, top_k: int = 5):
     if lstm_model is None:
         raise HTTPException(status_code=503, detail="LSTM model not loaded")
     
-    predictions = predict_lstm(context, top_k)
-    return PredictionResponse(
-        context=context,
-        model="lstm",
-        predictions=predictions
-    )
+    try:
+        predictions = predict_lstm(context, top_k)
+        return PredictionResponse(
+            context=context,
+            model="lstm",
+            predictions=predictions
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LSTM Prediction Failed: {str(e)}")
 
 @app.get("/predict/trigram")
 async def predict_trigram_endpoint(context: str, top_k: int = 5):
@@ -271,12 +256,15 @@ async def predict_trigram_endpoint(context: str, top_k: int = 5):
     if trigram_model is None:
         raise HTTPException(status_code=503, detail="Trigram model not loaded")
     
-    predictions = predict_trigram(context, top_k)
-    return PredictionResponse(
-        context=context,
-        model="trigram",
-        predictions=predictions
-    )
+    try:
+        predictions = predict_trigram(context, top_k)
+        return PredictionResponse(
+            context=context,
+            model="trigram",
+            predictions=predictions
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Trigram Prediction Failed: {str(e)}")
 
 # =============================================================================
 # Run with: uvicorn api:app --reload

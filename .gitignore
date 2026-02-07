@@ -31,3 +31,4 @@ output.txt
 
 # Data (large files - clone bbc_pidgin_scraper separately)
 bbc_pidgin_scraper/
+output.txt

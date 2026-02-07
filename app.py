@@ -85,21 +85,38 @@ API_BASE_URL = st.sidebar.text_input(
 # API Functions
 # =============================================================================
 def get_predictions(context: str, top_k: int = 5) -> Dict:
-    """Call the API to get predictions from both models."""
+    """Call the API to get predictions from both models separately for robustness."""
+    results = {"lstm": [], "trigram": []}
+    
+    # 1. Get LSTM predictions
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/predict",
-            json={"context": context, "top_k": top_k},
-            timeout=30
+        response = requests.get(
+            f"{API_BASE_URL}/predict/lstm",
+            params={"context": context, "top_k": top_k},
+            timeout=15
         )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        return {"error": "Cannot connect to API. Make sure the API server is running."}
-    except requests.exceptions.Timeout:
-        return {"error": "API request timed out."}
+        if response.status_code == 200:
+            results["lstm"] = response.json().get("predictions", [])
+        else:
+            results["lstm_error"] = f"Error {response.status_code}: {response.text}"
     except Exception as e:
-        return {"error": str(e)}
+        results["lstm_error"] = str(e)
+
+    # 2. Get Trigram predictions
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/predict/trigram",
+            params={"context": context, "top_k": top_k},
+            timeout=15
+        )
+        if response.status_code == 200:
+            results["trigram"] = response.json().get("predictions", [])
+        else:
+            results["trigram_error"] = f"Error {response.status_code}: {response.text}"
+    except Exception as e:
+        results["trigram_error"] = str(e)
+        
+    return results
 
 def check_api_health() -> Dict:
     """Check if API is healthy."""
@@ -109,6 +126,9 @@ def check_api_health() -> Dict:
     except:
         return {"status": "offline"}
 
+# =============================================================================
+# UI Components
+# =============================================================================
 # =============================================================================
 # UI Components
 # =============================================================================
@@ -213,30 +233,33 @@ if context:
     with st.spinner("Getting predictions..."):
         result = get_predictions(context, top_k)
     
-    if "error" in result:
-        st.error(f"API Error: {result['error']}")
-    else:
-        lstm_preds = result.get("lstm", [])
-        trigram_preds = result.get("trigram", [])
+    if "lstm_error" in result:
+        st.error(f"LSTM Error: {result['lstm_error']}")
         
-        if "Compare" in model_choice:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### 🤖 LSTM Neural Network")
-                render_predictions(lstm_preds, "LSTM")
-            
-            with col2:
-                st.markdown("### 📊 Trigram Statistical")
-                render_predictions(trigram_preds, "Trigram")
+    if "trigram_error" in result:
+        st.error(f"Trigram Error: {result['trigram_error']}")
+
+    lstm_preds = result.get("lstm", [])
+    trigram_preds = result.get("trigram", [])
+    
+    if "Compare" in model_choice:
+        col1, col2 = st.columns(2)
         
-        elif "LSTM" in model_choice:
-            st.markdown("### 🤖 LSTM Predictions")
+        with col1:
+            st.markdown("### 🤖 LSTM Neural Network")
             render_predictions(lstm_preds, "LSTM")
         
-        else:
-            st.markdown("### 📊 Trigram Predictions")
+        with col2:
+            st.markdown("### 📊 Trigram Statistical")
             render_predictions(trigram_preds, "Trigram")
+    
+    elif "LSTM" in model_choice:
+        st.markdown("### 🤖 LSTM Predictions")
+        render_predictions(lstm_preds, "LSTM")
+    
+    else:
+        st.markdown("### 📊 Trigram Predictions")
+        render_predictions(trigram_preds, "Trigram")
 
 # Footer
 st.markdown("---")
