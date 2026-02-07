@@ -1,19 +1,26 @@
 """
-Gradio app for Nigerian Pidgin Next-Word Prediction.
+Streamlit app for Nigerian Pidgin Next-Word Prediction.
 Deploy to Hugging Face Spaces.
 """
 
-import gradio as gr
+import streamlit as st
 import torch
 import torch.nn as nn
 import re
-from typing import List, Dict, Tuple
+from typing import List, Dict
+
+# Page config
+st.set_page_config(
+    page_title="Nigerian Pidgin Predictor",
+    page_icon="💬",
+    layout="centered"
+)
 
 # Special tokens
 PAD_TOKEN = '<PAD>'
 UNK_TOKEN = '<UNK>'
 SOS_TOKEN = '<SOS>'
-EOS_TOKEN = '<EOS>'
+EOS_TOKEN = '</EOS>'
 
 
 def clean_text(text: str) -> str:
@@ -64,83 +71,89 @@ class LSTMLanguageModel(nn.Module):
         return logits
 
 
-# Load model
-print("Loading model...")
-checkpoint = torch.load('model/lstm_pidgin_model.pt', map_location='cpu')
-word_to_idx = checkpoint['word_to_idx']
-idx_to_word = checkpoint['idx_to_word']
-vocab_size = checkpoint['vocab_size']
+@st.cache_resource
+def load_model():
+    """Load model (cached)."""
+    checkpoint = torch.load('model/lstm_pidgin_model.pt', map_location='cpu')
+    word_to_idx = checkpoint['word_to_idx']
+    idx_to_word = checkpoint['idx_to_word']
+    vocab_size = checkpoint['vocab_size']
+    
+    model = LSTMLanguageModel(vocab_size=vocab_size)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    
+    return model, word_to_idx, idx_to_word
 
-model = LSTMLanguageModel(vocab_size=vocab_size)
-model.load_state_dict(checkpoint['model_state_dict'])
-model.eval()
-print(f"Model loaded! Vocab size: {vocab_size:,}")
 
-
-def predict_next_words(context: str, top_k: int = 5) -> str:
+def predict_next_words(context: str, model, word_to_idx, idx_to_word, top_k: int = 5):
     """Predict next words given context."""
     if not context.strip():
-        return "Please enter some text..."
+        return []
     
-    # Tokenize and convert to indices
     tokens = tokenize(clean_text(context))
     if not tokens:
-        return "No valid tokens found in input."
+        return []
     
     unk_idx = word_to_idx.get(UNK_TOKEN, 1)
     indices = [word_to_idx.get(t, unk_idx) for t in tokens]
     
-    # Create input tensor
     x = torch.tensor([indices], dtype=torch.long)
     
     with torch.no_grad():
         logits = model(x)
         probs = torch.softmax(logits, dim=-1)
     
-    # Get top-k predictions
     top_probs, top_indices = torch.topk(probs[0], top_k)
     
     results = []
     for prob, idx in zip(top_probs.numpy(), top_indices.numpy()):
         word = idx_to_word.get(str(idx), idx_to_word.get(idx, UNK_TOKEN))
         if word not in [PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]:
-            results.append(f"**{word}** ({prob:.1%})")
+            results.append((word, float(prob)))
     
-    return "\n".join(results) if results else "No predictions available."
+    return results
 
 
-# Gradio Interface
-demo = gr.Interface(
-    fn=predict_next_words,
-    inputs=[
-        gr.Textbox(
-            label="Enter Nigerian Pidgin text",
-            placeholder="e.g., 'i dey', 'wetin you', 'how far'",
-            lines=2
-        ),
-        gr.Slider(
-            minimum=1, maximum=10, value=5, step=1,
-            label="Number of predictions"
-        )
-    ],
-    outputs=gr.Markdown(label="Predicted next words"),
-    title="🇳🇬 Nigerian Pidgin Next-Word Predictor",
-    description="""
-    **LSTM Language Model** trained on Nigerian Pidgin text.
-    
-    Enter some Pidgin text and get predictions for the next word!
-    
-    Try: "i dey", "wetin you", "na the", "how far", "e don"
-    """,
-    examples=[
-        ["i dey", 5],
-        ["wetin you", 5],
-        ["how far", 5],
-        ["na the", 5],
-        ["e don", 5],
-    ],
-    theme=gr.themes.Soft()
+# Load model
+model, word_to_idx, idx_to_word = load_model()
+
+# UI
+st.title("💬 Nigerian Pidgin Next-Word Predictor")
+st.markdown("**LSTM Language Model** trained on Nigerian Pidgin text.")
+
+# Input
+context = st.text_input(
+    "Enter Nigerian Pidgin text:",
+    placeholder="e.g., 'i dey', 'wetin you', 'how far'"
 )
 
-if __name__ == "__main__":
-    demo.launch()
+top_k = st.slider("Number of predictions:", 1, 10, 5)
+
+# Predict button
+if st.button("Predict", type="primary") or context:
+    if context:
+        predictions = predict_next_words(context, model, word_to_idx, idx_to_word, top_k)
+        
+        if predictions:
+            st.subheader("Predictions:")
+            for word, prob in predictions:
+                st.markdown(f"**{word}** — {prob:.1%}")
+        else:
+            st.warning("No predictions available.")
+    else:
+        st.info("Enter some text to get predictions.")
+
+# Examples
+st.markdown("---")
+st.markdown("**Try these examples:**")
+cols = st.columns(4)
+examples = ["i dey", "wetin you", "how far", "e don"]
+for col, ex in zip(cols, examples):
+    if col.button(ex):
+        st.session_state['context'] = ex
+        st.rerun()
+
+# Footer
+st.markdown("---")
+st.caption("Trained on NaijaSenti + BBC Pidgin corpus (~10k texts)")
