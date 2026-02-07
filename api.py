@@ -123,11 +123,21 @@ word_to_idx = None
 idx_to_word = None
 trigram_model = None
 
+# =============================================================================
+# Custom Unpickler to fix the 'src' module error
+# =============================================================================
+class PatchingUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        # If the pickle creates a dependency on 'src', redirect it to __main__
+        if module.startswith("src") and name == "TrigramLM":
+            return TrigramLM
+        return super().find_class(module, name)
+
 @app.on_event("startup")
 async def load_models():
     global lstm_model, word_to_idx, idx_to_word, trigram_model
     
-    # Load LSTM
+    # 1. Load LSTM
     try:
         checkpoint = torch.load('model/lstm_pidgin_model.pt', map_location='cpu')
         word_to_idx = checkpoint['word_to_idx']
@@ -140,11 +150,12 @@ async def load_models():
         print(f"LSTM model loaded! Vocab size: {vocab_size}")
     except Exception as e:
         print(f"Failed to load LSTM model: {e}")
-    
-    # Load Trigram
+
+    # 2. Load Trigram (Using the Custom Unpickler)
     try:
         with open('model/trigram_model.pkl', 'rb') as f:
-            trigram_model = pickle.load(f)
+            # Use PatchingUnpickler instead of standard pickle.load
+            trigram_model = PatchingUnpickler(f).load()
         print(f"Trigram model loaded! Vocab size: {len(trigram_model.vocab)}")
     except Exception as e:
         print(f"Failed to load Trigram model: {e}")

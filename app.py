@@ -171,20 +171,40 @@ with st.sidebar:
     """)
 
 # Main input
+try:
+    from st_keyup import st_keyup
+except ImportError:
+    st.error("Please install streamlit-keyup: pip install streamlit-keyup")
+    def st_keyup(label, value="", key=None, **kwargs):
+        return st.text_input(label, value=value, key=key)
+
 st.markdown("### Enter Nigerian Pidgin text:")
-context = st.text_input(
-    label="Context",
-    placeholder="e.g., 'i dey', 'wetin you', 'how far'",
-    label_visibility="collapsed"
-)
+
+# Handle example button clicks updates
+if 'context_value' not in st.session_state:
+    st.session_state['context_value'] = ""
+
+def set_example(ex):
+    st.session_state['context_value'] = ex
 
 # Example buttons
 st.markdown("**Try these examples:**")
 example_cols = st.columns(5)
 examples = ["i dey", "wetin you", "how far", "e don", "make we"]
 for col, ex in zip(example_cols, examples):
-    if col.button(ex, use_container_width=True):
-        context = ex
+    col.button(ex, use_container_width=True, on_click=set_example, args=(ex,))
+
+# Input with real-time updates
+context = st_keyup(
+    label="Context",
+    value=st.session_state['context_value'],
+    key="keyup_context",
+    label_visibility="collapsed",
+    placeholder="e.g., 'i dey', 'wetin you', 'how far'"
+)
+# Sync keyup back to session if typed manually (optional, but good for consistency)
+if context != st.session_state['context_value']:
+    st.session_state['context_value'] = context
 
 # Predictions
 if context:
