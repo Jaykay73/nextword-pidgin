@@ -22,9 +22,9 @@ Thumbs.db
 output.txt
 *.log
 
-# Model checkpoints
-*.pt
-*.pth
+# Model checkpoints (except model/ folder)
+# *.pt
+# *.pth
 
 # Jupyter
 .ipynb_checkpoints/
