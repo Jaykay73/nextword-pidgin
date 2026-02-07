@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+output.txt
+*.log
+
+# Model checkpoints
+*.pt
+*.pth
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (large files - clone bbc_pidgin_scraper separately)
+bbc_pidgin_scraper/
